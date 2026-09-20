@@ -39,6 +39,7 @@ htmlcov/
 # deployment, a key, a token file or a live database cannot be committed by habit.
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 *.p12
@@ -64,6 +65,9 @@ logs/
 reports/
 *.log
 *.jsonl
+
+# The compose file's favourites document, written into ./state on first run.
+state/
 
 # Added by code-review-graph
 .code-review-graph/

@@ -10,7 +10,8 @@ running *skills* (self-contained Python programs described by a `skill.json` man
 No pull requests, you are free to fork it, use it, enhance it on your own.
 
 [Why it exists](#why-this-project) is the next section; [how to run
-it](#how-to-use-this) is the one after that. The layout:
+it](#how-to-use-this) — in Docker, or straight from a checkout — is the one after that. The
+layout:
 
 ![The Hermes Portal index page, a demo instance: the eight skill tiles across the top, then a card per domain](/docs/screenshot.png)
 
@@ -122,12 +123,58 @@ of it, and it stays useful on its own for discovering and running `skill.json` p
 
 ## How to use this
 
-**Run the portal.** This is the main way in:
+**Run the portal — as a container.** This repository is the Docker deployment: it ships
+`compose.yaml` and the `Dockerfile`, and the image is standard-library Python 3.12 with
+nothing installed but the code.
+
+```sh
+git clone https://github.com/rpmalouin/Hermes-Portal-Docker
+cd Hermes-Portal-Docker
+docker compose up -d --build          # then open http://127.0.0.1:8087
+```
+
+It needs two paths from you, and has a default for each, so an empty `.env` runs as-is:
+`HERMES_HOME_PATH` (the Hermes home to read — `~/.hermes`) and `VAULT_PATH` (an Obsidian
+vault; leave it unset if you have none). Copy `.env.example` to `.env` to set either, the
+published `PORTAL_PORT`, and `PORTAL_LABEL` — the name this instance shows in its header and
+page title, which is how two portals are told apart.
+
+Without compose, the same thing by hand:
+
+```sh
+docker build -t hermes-portal .
+docker run -d --name hermes-portal -p 8087:8087 \
+  -v "$HOME/.hermes":/hermes \
+  -v "$HOME/Obsidian":/vault:ro \
+  -v "$PWD/state":/state \
+  hermes-portal \
+  --hermes-home /hermes --vault /vault --state /state/state.json \
+  --host 0.0.0.0 --port 8087 --label "$(hostname)"
+```
+
+Three things about those mounts, because each one has a reason a reader would otherwise
+guess wrong:
+
+| Mount | Why |
+| --- | --- |
+| your Hermes home, read-**write** | every store is opened `mode=ro`, but SQLite needs the *directory* writable to read a WAL database whose `-shm` index is absent — a `:ro` bind fails with `unable to open database file` |
+| `./state` | the portal's only write (the favourites document), kept out of the Hermes home |
+| the vault, `:ro` | it is never written; a missing path is reported `MISSING` rather than as an error |
+
+Publishing the port means the process binds `0.0.0.0`, which turns off the `Host`-header
+allow-list and starts logging requests — read
+[the security note](#what-it-does-about-being-a-local-server-holding-secrets) before putting
+this anywhere but a host you control. To keep it loopback-only, drop `ports:` and run with
+`--host 127.0.0.1`, and reach it through a tunnel or a reverse proxy.
+
+**Or run it from a checkout** — the same code with no Docker, Python 3.11+, from the project
+root:
 
 ```sh
 python3 -m hermes.portal                    # http://127.0.0.1:8087
 python3 -m hermes.portal --list             # print what it would serve, no server
 python3 -m hermes.portal --no-state         # serve with writing switched off
+python3 -m hermes.portal --label mac-mini   # name this instance
 .venv/bin/hermes-portal --port 8087         # the installed console script
 ```
 
@@ -170,7 +217,7 @@ python3 -m hermes.cli.shell      # the `hermes>` REPL: `skills`, `run <name> [--
 **Check it still works:**
 
 ```sh
-python3 -m unittest discover -s tests -t .    # 432 tests
+python3 -m unittest discover -s tests -t .    # 527 tests
 uvx ruff@0.14.4 check .                       # lint, configured in pyproject.toml
 ```
 
@@ -181,11 +228,17 @@ Where to go next: the skill framework from [Requirements](#requirements) through
 
 ## Requirements
 
-* Python 3.11 or newer (developed and verified on 3.12.1)
-* No third-party dependencies — the framework is standard library only. It runs
-  straight from the checkout (no build) or can be installed as a package.
+* **Docker** for the container path above (any recent Docker with Compose v2) — or
+  **Python 3.11 or newer** (developed and verified on 3.12.1) to run it straight from a
+  checkout.
+* No third-party Python dependencies — both halves are standard library only. The image adds
+  one OS package, `lsof`, which the health domain uses to list listening ports.
 
 ## Install (optional)
+
+This section, and the one after it, are about the **skill framework** — the other half of the
+repository. The portal itself needs nothing but Docker (see
+[How to use this](#how-to-use-this)).
 
 Running from the checkout needs nothing. To get the `hermes` console script:
 
@@ -201,7 +254,7 @@ A non-editable wheel carries the skills and profiles as well
 `pyproject.toml`), so an installed copy lists and runs skills with no project
 directory present.
 
-## Quick start
+## Quick start (the skill framework)
 
 `python -m hermes.cli.shell` resolves the package from the current directory, so
 run it from the project root — or use the installed `hermes` script, which works
@@ -706,6 +759,14 @@ than pretend:
 | logs | also reads `~/Library/Logs/*.log` | reads `$HERMES_HOME/logs` only |
 | vault | defaults to `$HERMES_VAULT`, else the author's `/Volumes/Data/MyObsidian` | pass `--vault <path>`, or it reports an empty vault |
 
+In a container, three more things follow from the same shape. The Hermes home is mounted
+read-**write** (the WAL reason in [How to use this](#how-to-use-this)); a published port
+requires `--host 0.0.0.0` inside the container, since a port arrives on the container's own
+address and never on its loopback; and the health domain's `ports` collection can only report
+the sockets in the container's own network namespace -- on the host network it lists the
+machine's real listeners instead. The image carries `lsof` for that collection; without it the
+collection says so rather than guessing.
+
 Everything else -- skills, sessions, cron, usage, the code graph, favourites -- is
 resolved from the Hermes home and needs no platform code.
 
@@ -779,7 +840,7 @@ through its own MCP tools.
 ## Tests and checks
 
 ```sh
-python3 -m unittest discover -s tests -t .        # 472 tests, ~30s, no install needed
+python3 -m unittest discover -s tests -t .        # 527 tests, ~50s, no install needed
 uvx ruff@0.14.4 check .                           # lint, configured in pyproject.toml
 uvx ruff@0.14.4 format --check .
 

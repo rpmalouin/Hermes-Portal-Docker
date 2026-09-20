@@ -1,0 +1,77 @@
+# The portal as a container.  `docker compose up -d --build` is the whole install.
+#
+# Every value below defaults to the usual location, so an empty `.env` works; copy
+# `.env.example` to `.env` to point it at your own paths, port and label.
+
+services:
+  hermes-portal:
+    build: .
+    image: hermes-portal:local
+    restart: unless-stopped
+
+    ports:
+      # Which *host* port the page is published on; the container always listens
+      # on 8087 internally.
+      - "${PORTAL_PORT:-8087}:8087"
+
+    environment:
+      HERMES_HOME: /hermes
+      HERMES_VAULT: /vault
+      TZ: ${TZ:-UTC}
+
+    volumes:
+      # Your Hermes home -- the directory holding state.db, cron/, skills/,
+      # memories/.  Read-WRITE on purpose even though the portal only reads it:
+      # every store is opened `mode=ro`, but SQLite cannot read a WAL database
+      # whose -shm index is absent unless the *directory* is writable, and a :ro
+      # bind fails with "unable to open database file" when it is not.
+      - "${HERMES_HOME_PATH:-$HOME/.hermes}:/hermes"
+
+      # Your Obsidian vault, if you have one.  A missing or empty path is not an
+      # error: the vault domain reports the source MISSING and says so on the
+      # page, and every other domain is unaffected.
+      - "${VAULT_PATH:-$HOME/Obsidian}:/vault:ro"
+
+      # Optional: a code graph database for the graph domain (it reads the tables
+      # a code-review-graph build writes).  Uncomment and set GRAPH_DB to show a
+      # graph, or leave it out and the domain reports the source MISSING.
+      # - "${GRAPH_DB:-$HOME/.hermes/.code-review-graph/graph.db}:/graphs/graph.db:ro"
+
+      # The portal's only write: the favourites document.  Kept outside the
+      # Hermes home so the home itself needs no writable surface of its own.
+      - ./state:/state
+
+    command:
+      - --hermes-home
+      - /hermes
+      - --vault
+      - /vault
+      - --state
+      - /state/state.json
+      # A published port arrives on the container's own address, never on its
+      # loopback, so the process has to bind 0.0.0.0 to be reachable.  Off
+      # loopback the portal drops its Host-header allow-list (that check is
+      # against DNS rebinding and is only meaningful on a loopback socket) and
+      # logs every request.  See the README's security note before publishing
+      # this beyond a host you control.
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8087"
+      # The name this instance shows in its header and page title.  Two portals
+      # render identically otherwise, so set it to the machine's name.
+      - --label
+      - ${PORTAL_LABEL:-hermes-portal}
+
+    healthcheck:
+      # The image is stdlib-only, so the probe is too: /index.json is the portal's
+      # own document and answering it means the registry built.
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8087/index.json', timeout=10).status == 200 else 1)"
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
