@@ -75,6 +75,11 @@ raise SystemExit(
             "--state",
             str(DEMO / "home" / "portal" / "state.json"),
             "--no-all-profiles",
+            # The page names its instance, and the default is the hostname -- which on
+            # the machine that shoots this image is a real machine name.  The fixture's
+            # own name keeps that off a public page, like every other real value here.
+            "--label",
+            "demo",
             "--port",
             str(ARGS.port),
         ]

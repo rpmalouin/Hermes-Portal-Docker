@@ -10,7 +10,7 @@ Two things get their own tests because they were wrong first:
   and the filter has to survive the server's query-string whitelist;
 * **search offsets** -- the snippet has to contain the match.  Scanning "title + text"
   and then slicing the text shifted every hit by the length of the title, so a search
-  for ``dockerVM`` returned a fragment of some other sentence.
+  for ``demoVM`` returned a fragment of some other sentence.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ SEPARATOR = "\u00a7"
 MEMORY_TEXT = (
     "First note about the portal. It has detail.\n\n"
     f"{SEPARATOR}\n\n"
-    "Second note mentioning dockerVM once, then other words.\n\n"
+    "Second note mentioning demoVM once, then other words.\n\n"
     f"{SEPARATOR}\n\n"
     "Third note, shorter.\n"
 )
@@ -271,7 +271,7 @@ class MemoryDomainTestCase(unittest.TestCase):
     def test_file_detail_has_the_text_and_both_sections(self) -> None:
         detail = self.registry.safe_detail(self.domain, "default/memory")
         self.assertEqual(detail.title, "MEMORY.md · default")
-        self.assertIn("dockerVM", detail.body)
+        self.assertIn("demoVM", detail.body)
         sections = {
             section.key
             for section in self.registry.safe_sections(self.domain, "default/memory")
@@ -280,7 +280,7 @@ class MemoryDomainTestCase(unittest.TestCase):
 
     def test_entry_detail_has_the_text_and_neighbours(self) -> None:
         detail = self.registry.safe_detail(self.domain, "default/memory/2")
-        self.assertIn("dockerVM", detail.body)
+        self.assertIn("demoVM", detail.body)
         self.assertEqual(dict(detail.fields)["position"], "2 of 3")
         sections = self.registry.safe_sections(self.domain, "default/memory/2")
         self.assertEqual([section.key for section in sections], ["neighbours"])
@@ -293,13 +293,13 @@ class MemoryDomainTestCase(unittest.TestCase):
         self.assertEqual(self.registry.safe_sections(self.domain, "nope/memory"), [])
 
     def test_search_finds_an_entry_and_the_snippet_contains_the_hit(self) -> None:
-        hits = self.domain.search("dockerVM", 5)
+        hits = self.domain.search("demoVM", 5)
         self.assertEqual(len(hits), 1)
-        self.assertIn("dockerVM", hits[0].subtitle)
+        self.assertIn("demoVM", hits[0].subtitle)
         self.assertEqual(hits[0].id, "default/memory/2")
 
     def test_search_is_case_insensitive_and_ignores_an_empty_query(self) -> None:
-        self.assertEqual(len(self.domain.search("DOCKERvm", 5)), 1)
+        self.assertEqual(len(self.domain.search("DEMOVM", 5)), 1)
         self.assertEqual(self.domain.search("   ", 5), [])
 
     def test_search_matches_a_title_whose_text_differs(self) -> None:
@@ -345,7 +345,7 @@ class MemoryDomainTestCase(unittest.TestCase):
                 self.assertEqual(collection.count.value, 0)
 
     def test_cross_domain_search_includes_memory(self) -> None:
-        groups = self.registry.search("dockerVM", 5)
+        groups = self.registry.search("demoVM", 5)
         self.assertIn("memory", groups)
         self.assertTrue(groups["memory"])
 

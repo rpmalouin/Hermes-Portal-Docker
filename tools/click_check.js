@@ -93,7 +93,13 @@ function report(name, detail, ok) {
     return res.result.result.value;
   };
 
-  report("the page loads", await evaluate("document.title"), (await evaluate("document.title")) === "Hermes Portal");
+  // the document title carries the instance label after " · " when one is set
+  const pageTitle = await evaluate("document.title");
+  report(
+    "the page loads",
+    pageTitle,
+    pageTitle === "Hermes Portal" || pageTitle.startsWith("Hermes Portal \u00b7")
+  );
   report("the refresh button is in the header", "", await evaluate('!!document.getElementById("refresh")'));
 
   // 1. the theme toggle: its listener exists only if /app.js ran at all

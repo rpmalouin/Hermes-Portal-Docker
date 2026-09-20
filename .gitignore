@@ -33,6 +33,38 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# Secrets and local state.  Nothing in this list is in the repository today; the
+# entries are here so that the first time someone runs a copy against a real
+# deployment, a key, a token file or a live database cannot be committed by habit.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+id_rsa*
+id_ed25519*
+*_smbcred*
+credential*.json
+service-account*.json
+.gpg/
+
+# Live stores and their journals: the portal reads these, the repository must not
+# carry them (a Hermes state.db holds one's whole session history).
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Runtime output
+logs/
+reports/
+*.log
+*.jsonl
+
 # Added by code-review-graph
 .code-review-graph/
 
@@ -45,6 +77,7 @@ htmlcov/
 .cursorrules
 .gemini/
 .github/code-review-graph*
+.github/instructions/
 .kiro/
 .mcp.json
 .qoder/

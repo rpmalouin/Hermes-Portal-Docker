@@ -22,9 +22,11 @@ python3 tools/demo_shot/build_demo.py
 python3 tools/demo_shot/shim.py             # http://127.0.0.1:8089/
 
 # 3. scan every route before you capture: nothing real may appear on the pages
+#    ($(hostname) is in the list because the page labels itself with the machine's
+#    name unless the shim passed --label, and "demo" is the only name allowed there)
 for route in / /index.json /agents /sessions /vault; do
   curl -s "http://127.0.0.1:8089$route"
-done | grep -Ec "/Users/|/Volumes/|code-scaffolding-agent"   # must print 0
+done | grep -Ec "/Users/|/Volumes/|code-scaffolding-agent|$(hostname)"   # must print 0
 
 # 4. capture -- Chrome running with --remote-debugging-port=9222
 node tools/demo_shot/shot.js http://127.0.0.1:8089/ docs/screenshot.png 2826 1

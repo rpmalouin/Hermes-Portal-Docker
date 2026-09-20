@@ -387,7 +387,7 @@ class TestHealthDomain(BaseP1):
         if argv[0] == "lsof":
             return (
                 "COMMAND   PID USER   FD   TYPE  DEVICE SIZE/OFF NODE NAME\n"
-                "Python  4242  ron    3u  IPv4  0x1234      0t0  TCP "
+                "Python  4242  demo   3u  IPv4  0x1234      0t0  TCP "
                 "127.0.0.1:9119 (LISTEN)\n",
                 "",
             )

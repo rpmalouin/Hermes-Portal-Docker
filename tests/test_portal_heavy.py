@@ -47,10 +47,10 @@ def make_vault(root: Path) -> Path:
     write(
         root / "Hermes" / "Hermes Kanban.md",
         "---\ntags:\n  - kanban\nkanban-plugin: board\n---\n\n"
-        "## Backlog\n\n## Hermes-Mac (Active)\n\n"
+        "## Backlog\n\n## Demo-Host (Active)\n\n"
         "- [ ] Ship the vault domain\n"
         "\t- **Task:** expose notes with backlinks\n"
-        "\t- **Node:** Mac\n"
+        "\t- **Node:** workstation\n"
         "\t- **Status:** active\n"
         "\t- **Context:** the portal's second plane\n\n"
         "## Done\n\n"
@@ -380,7 +380,7 @@ class VaultTestCase(unittest.TestCase):
         shipped = by_title["Ship the vault domain"]
         self.assertEqual(shipped["status"], "active")
         self.assertEqual(shipped["checkbox"], "open")
-        self.assertEqual(shipped["node"], "Mac")
+        self.assertEqual(shipped["node"], "workstation")
         wired = by_title["Wire the graph domain"]
         # unchecked box, but the card says done: the field is the state
         self.assertEqual(wired["status"], "done")

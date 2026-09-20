@@ -1,6 +1,6 @@
 # Hermes Portal
 
-[![tests](https://github.com/rpmalouin/Hermes-Portal/actions/workflows/tests.yml/badge.svg)](https://github.com/rpmalouin/Hermes-Portal/actions/workflows/tests.yml)
+[![tests](https://github.com/rpmalouin/Hermes-Portal-Docker/actions/workflows/tests.yml/badge.svg)](https://github.com/rpmalouin/Hermes-Portal-Docker/actions/workflows/tests.yml)
 
 Two standard-library-only Python halves that grew into one repository: **the Hermes
 Portal** — a read-only, eleven-domain drill-down over everything the running Hermes agent
@@ -15,7 +15,9 @@ it](#how-to-use-this) is the one after that. The layout:
 ![The Hermes Portal index page, a demo instance: the eight skill tiles across the top, then a card per domain](/docs/screenshot.png)
 
 *The page above is a demo instance -- a fixture Hermes home, not this machine, and the
-`demo-*` agent names are fixtures too. `tools/demo_shot/` builds and captures it.*
+`demo-*` agent names are fixtures too. The chip beside the title, `demo`, is that
+instance's label: a portal names the machine it serves so that two of them are never
+mistaken for each other (*`--label`*). `tools/demo_shot/` builds and captures it.*
 
 ```
 hermes/
@@ -156,7 +158,7 @@ stamps the `as of` time it was read (UTC), so a page always tells you how old it
 Useful flags: `--vault` (which Obsidian vault; or set `$HERMES_VAULT`), `--graph-db` (which code graph),
 `--profile` / `--all-profiles` (whose skills), `--hermes-home`, `--port`, `--host` (read
 [the security note](#what-it-does-about-being-a-local-server-holding-secrets) before moving
-off loopback), `--no-state`.
+off loopback), `--label` (which instance this is; defaults to the machine's hostname), `--no-state`.
 
 **Run the skill framework** — the other half, if you came for skills:
 
@@ -706,6 +708,14 @@ than pretend:
 
 Everything else -- skills, sessions, cron, usage, the code graph, favourites -- is
 resolved from the Hermes home and needs no platform code.
+
+**Which instance is this?** Every page carries a label beside the brand and in its
+document title, because a second portal on a second machine renders byte-for-byte the
+same HTML otherwise -- two open tabs would be indistinguishable. The default is the
+machine's hostname, which is why `--label` exists: a container's hostname is its
+container id. The same `label` key rides on `/index.json`, `/<domain>.json`,
+`/<domain>/<id>.json`, `/search.json` and `/favorites.json`, so a script talking to two
+instances never has to guess which one answered.
 
 **Usage** is the single home for cost and token rollups: totals, by day, by model,
 by provider and the most expensive sessions (each linking into the sessions view that

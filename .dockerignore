@@ -1,0 +1,9 @@
+# The graph database and the checkout itself are not build inputs.
+.git
+.code-review-graph
+.venv
+__pycache__
+*.pyc
+.ruff_cache
+.pytest_cache
+.mypy_cache

@@ -10,6 +10,10 @@ Two rules:
   template, including record bodies and the query string.
 * Record bodies render inside ``<details>``, so a 50-message section cannot
   dominate a page while still being reachable in one click.
+
+The shell also carries an optional *label*: the name of the instance being served,
+printed beside the brand and appended to the document title.  Nothing else in a page
+differs between two machines, so without it two open tabs are indistinguishable.
 """
 
 from __future__ import annotations
@@ -119,6 +123,12 @@ PAGE = Template(
         flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1.5rem; padding: 0 0 1rem;
     }
     header.top .brand { font-size: 1.15rem; font-weight: 700; letter-spacing: 0.01em; }
+    header.top .brand .label {
+        background: var(--badge-bg); border: 1px solid var(--border-2);
+        border-radius: 999px; color: var(--badge-fg); font-size: 0.72rem;
+        font-weight: 600; margin-left: 0.5rem; padding: 0.1rem 0.5rem;
+        vertical-align: middle;
+    }
     nav.domains { display: flex; flex-wrap: wrap; gap: 0.85rem; }
     nav.domains a {
         background: var(--nav-bg); border: 1px solid var(--border-2);
@@ -405,8 +415,22 @@ def source_state(present: bool) -> str:
     return '<span class="warn">MISSING</span>'
 
 
-def _nav(domains: Sequence[Domain], current: str = "", query: str = "") -> str:
-    """Render the header: brand, domain links and the search form."""
+def label_chip(label: str) -> str:
+    """Render the instance label as a chip, or nothing when there is no label."""
+    return f'<span class="label">{html.escape(label)}</span>' if label.strip() else ""
+
+
+def _nav(
+    domains: Sequence[Domain],
+    current: str = "",
+    query: str = "",
+    label: str = "",
+) -> str:
+    """Render the header: brand, the instance label, domain links and the search form.
+
+    *label* names the instance (the machine, usually).  It sits beside the brand
+    because that is the one place a reader looks to answer "which one is this?".
+    """
     links = []
     for domain in domains:
         key = html.escape(domain.key, quote=True)
@@ -416,9 +440,10 @@ def _nav(domains: Sequence[Domain], current: str = "", query: str = "") -> str:
     placeholder = "Search every domain&hellip;"
     return (
         '<header class="top">\n'
-        '  <div class="brand"><a href="/">Hermes Portal</a></div>\n'
+        f'  <div class="brand"><a href="/">Hermes Portal</a>'
+        f"{label_chip(label)}</div>\n"
         f'  <nav class="domains">{joined}</nav>\n'
-        '  <form class="search" method="get" action="/search">\n'
+        f'  <form class="search" method="get" action="/search">\n'
         f'    <input name="q" value="{html.escape(query, quote=True)}"'
         f' placeholder="{placeholder}">\n'
         '    <button type="submit">Search</button>\n'
@@ -441,15 +466,19 @@ def _page(
     built_at: str,
     current: str = "",
     query: str = "",
+    label: str = "",
 ) -> str:
     """Wrap *body* in the shell.
 
     The shell renders no state of its own: the rail is part of *body*, and the star
-    buttons hydrate from ``/favorites.json`` client-side.
+    buttons hydrate from ``/favorites.json`` client-side.  *label* reaches both the
+    header and the document title -- the title is what a browser tab shows, which is
+    how two instances are told apart without switching to either.
     """
+    document_title = f"{title} \u00b7 {label}" if label.strip() else title
     return PAGE.substitute(
-        title=html.escape(title),
-        nav=_nav(domains, current, query),
+        title=html.escape(document_title),
+        nav=_nav(domains, current, query, label),
         body=body,
         built_at=html.escape(built_at),
     )
@@ -740,6 +769,7 @@ def render_index(
     built_at: str,
     favorites: Sequence[Favorite] = (),
     tiles: str = "",
+    label: str = "",
 ) -> str:
     """Render the portal index: tiles, one card per domain, plus the rail."""
     cards = []
@@ -784,7 +814,7 @@ def render_index(
         f"{rail}"
         "</div>"
     )
-    return _page("Hermes Portal", body, domains, built_at)
+    return _page("Hermes Portal", body, domains, built_at, label=label)
 
 
 def _rail(
@@ -856,6 +886,7 @@ def render_favorites(
     domains: Sequence[Domain],
     built_at: str,
     state_note: str = "",
+    label: str = "",
 ) -> str:
     """Render the favourites page: everything starred, grouped by domain."""
     if not favorites:
@@ -888,7 +919,7 @@ def render_favorites(
         f'<section class="panel">{inner}</section>'
         f"{note}"
     )
-    return _page("Favourites", body, domains, built_at)
+    return _page("Favourites", body, domains, built_at, label=label)
 
 
 def render_domain(
@@ -897,6 +928,7 @@ def render_domain(
     domains: Sequence[Domain],
     built_at: str,
     filters: Mapping[str, str] | None = None,
+    label: str = "",
 ) -> str:
     """Render a domain page: every collection it publishes."""
     active = {key: value for key, value in (filters or {}).items() if value}
@@ -919,7 +951,7 @@ def render_domain(
         f'<p class="lede">{html.escape(domain.summary)}</p>'
         f"{filter_line}{blocks}"
     )
-    return _page(domain.title, body, domains, built_at, domain.key)
+    return _page(domain.title, body, domains, built_at, domain.key, label=label)
 
 
 def render_detail(
@@ -928,6 +960,7 @@ def render_detail(
     sections: Sequence[Collection],
     domains: Sequence[Domain],
     built_at: str,
+    label: str = "",
 ) -> str:
     """Render one record, plus the collections behind it."""
     fields = "".join(
@@ -960,7 +993,7 @@ def render_detail(
         f'<p class="lede">{rich(record.subtitle)}</p>'
         f"{_badges(record)}{links}{table}{body}{sections_html}"
     )
-    return _page(record.title, page_body, domains, built_at, domain.key)
+    return _page(record.title, page_body, domains, built_at, domain.key, label=label)
 
 
 def render_search(
@@ -969,6 +1002,7 @@ def render_search(
     totals: Mapping[str, int],
     domains: Sequence[Domain],
     built_at: str,
+    label: str = "",
 ) -> str:
     """Render cross-domain search results, grouped by domain."""
     blocks = []
@@ -1005,10 +1039,12 @@ def render_search(
         "index; cron matches job definitions.</p>"
         f'<div class="grid">{"".join(blocks)}</div>'
     )
-    return _page(f"Search: {query}", body, domains, built_at, "", query)
+    return _page(f"Search: {query}", body, domains, built_at, "", query, label)
 
 
-def render_not_found(domains: Sequence[Domain], built_at: str, what: str) -> str:
+def render_not_found(
+    domains: Sequence[Domain], built_at: str, what: str, label: str = ""
+) -> str:
     """Render a 404 page that says what was missing."""
     body = (
         f'<div class="crumbs"><a href="/">Hermes Portal</a> / 404</div>'
@@ -1021,7 +1057,7 @@ def render_not_found(domains: Sequence[Domain], built_at: str, what: str) -> str
         )
         + "</p>"
     )
-    return _page("Not found", body, domains, built_at)
+    return _page("Not found", body, domains, built_at, label=label)
 
 
 APP_JS = r"""

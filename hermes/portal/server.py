@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import sys
 import time
 import urllib.parse
@@ -100,6 +101,24 @@ def allowed_hosts(host: str) -> tuple[str, ...]:
     return tuple(sorted({*LOOPBACK_HOSTS, host}))
 
 
+def instance_label(label: str | None = None) -> str:
+    """The name this portal shows for itself: *label*, else this machine's name.
+
+    Two instances render identically otherwise, and the page a reader is looking at
+    is exactly the thing they cannot tell apart.  The hostname is the honest
+    default; a container's hostname is its container id, which is why ``--label``
+    exists as an override.  Never raises: a machine without a name renders without
+    one.
+    """
+    given = (label or "").strip()
+    if given:
+        return given
+    try:
+        return socket.gethostname().split(".")[0].strip()
+    except OSError:  # pragma: no cover - a host with no name at all
+        return ""
+
+
 def jsonable(value: Any) -> Any:
     """Convert portal dataclasses into JSON-serialisable values."""
     if is_dataclass(value) and not isinstance(value, type):
@@ -123,11 +142,14 @@ def filters_from(query: str) -> dict[str, str]:
     }
 
 
-def index_payload(registry: DomainRegistry, built_at: str) -> dict[str, Any]:
+def index_payload(
+    registry: DomainRegistry, built_at: str, label: str = ""
+) -> dict[str, Any]:
     """The JSON index: every domain with its overview."""
     domains = registry.all()
     return {
         "built_at": built_at,
+        "label": label,
         "counts": {
             domain.key: registry.safe_overview(domain).count.value for domain in domains
         },
@@ -144,11 +166,16 @@ def index_payload(registry: DomainRegistry, built_at: str) -> dict[str, Any]:
 
 
 def domain_payload(
-    registry: DomainRegistry, domain: Domain, filters: Mapping[str, str], built_at: str
+    registry: DomainRegistry,
+    domain: Domain,
+    filters: Mapping[str, str],
+    built_at: str,
+    label: str = "",
 ) -> dict[str, Any]:
     """One domain's collections as JSON."""
     return {
         "built_at": built_at,
+        "label": label,
         "domain": domain.key,
         "filters": dict(filters),
         "collections": jsonable(registry.safe_collections(domain, filters)),
@@ -156,7 +183,11 @@ def domain_payload(
 
 
 def detail_payload(
-    registry: DomainRegistry, domain: Domain, record_id: str, built_at: str
+    registry: DomainRegistry,
+    domain: Domain,
+    record_id: str,
+    built_at: str,
+    label: str = "",
 ) -> dict[str, Any] | None:
     """One record plus its sections as JSON, or ``None`` when it is unknown."""
     record = registry.safe_detail(domain, record_id)
@@ -164,6 +195,7 @@ def detail_payload(
         return None
     return {
         "built_at": built_at,
+        "label": label,
         "domain": domain.key,
         "record": jsonable(record),
         "sections": jsonable(registry.safe_sections(domain, record_id)),
@@ -171,12 +203,13 @@ def detail_payload(
 
 
 def search_payload(
-    registry: DomainRegistry, query: str, limit: int, built_at: str
+    registry: DomainRegistry, query: str, limit: int, built_at: str, label: str = ""
 ) -> dict[str, Any]:
     """Search results as JSON, with per-domain totals."""
     groups = registry.search(query, limit)
     return {
         "built_at": built_at,
+        "label": label,
         "query": query,
         "limit": limit,
         "order": [domain.key for domain in registry.all()],
@@ -230,6 +263,9 @@ class PortalHandler(BaseHTTPRequestHandler):
     registry: DomainRegistry | None = None
     state: PortalState | None = None
     built_at: str = ""
+    #: The name shown in the header and page title: this instance's machine, so two
+    #: portals are distinguishable.  Set by :func:`serve`.
+    label: str = ""
     render_limit: int = 20
     #: Names this server answers to; empty means no check (bound where the operator
     #: asked, so exposure was their call).  Set by :func:`serve`.
@@ -295,6 +331,7 @@ class PortalHandler(BaseHTTPRequestHandler):
                     self.built_at,
                     favorites=snapshot.favorites if snapshot else (),
                     tiles=render.render_tiles(coverage(counts)) if counts else "",
+                    label=self.label,
                 )
             )
             return
@@ -317,17 +354,20 @@ class PortalHandler(BaseHTTPRequestHandler):
                     domains,
                     self.built_at,
                     note,
+                    label=self.label,
                 )
             )
             return
         if segments == ["index.json"]:
-            self._send_json(index_payload(registry, self.built_at))
+            self._send_json(index_payload(registry, self.built_at, self.label))
             return
         if segments[0] in ("search", "search.json"):
             query = urllib.parse.parse_qs(parsed.query).get("q", [""])[0].strip()
             if segments[0] == "search.json":
                 self._send_json(
-                    search_payload(registry, query, self.render_limit, self.built_at)
+                    search_payload(
+                        registry, query, self.render_limit, self.built_at, self.label
+                    )
                 )
                 return
             groups = registry.search(query, self.render_limit) if query else {}
@@ -336,7 +376,9 @@ class PortalHandler(BaseHTTPRequestHandler):
                 for domain in domains
             }
             self._send_html(
-                render.render_search(query, groups, totals, domains, self.built_at)
+                render.render_search(
+                    query, groups, totals, domains, self.built_at, self.label
+                )
             )
             return
 
@@ -351,13 +393,13 @@ class PortalHandler(BaseHTTPRequestHandler):
         if len(segments) == 1:
             if wants_json:
                 self._send_json(
-                    domain_payload(registry, domain, filters, self.built_at)
+                    domain_payload(registry, domain, filters, self.built_at, self.label)
                 )
                 return
             collections = registry.safe_collections(domain, filters)
             self._send_html(
                 render.render_domain(
-                    domain, collections, domains, self.built_at, filters
+                    domain, collections, domains, self.built_at, filters, self.label
                 )
             )
             return
@@ -371,11 +413,15 @@ class PortalHandler(BaseHTTPRequestHandler):
             self._not_found(f"no record {record_id!r} in domain {key!r}")
             return
         if wants_json:
-            self._send_json(detail_payload(registry, domain, record_id, self.built_at))
+            self._send_json(
+                detail_payload(registry, domain, record_id, self.built_at, self.label)
+            )
             return
         sections = registry.safe_sections(domain, record_id)
         self._send_html(
-            render.render_detail(domain, record, sections, domains, self.built_at)
+            render.render_detail(
+                domain, record, sections, domains, self.built_at, label=self.label
+            )
         )
 
     def _send(self, status: int, content_type: str, body: bytes) -> None:
@@ -403,6 +449,7 @@ class PortalHandler(BaseHTTPRequestHandler):
         favorites = snapshot.favorites if snapshot else ()
         return {
             "built_at": self.built_at,
+            "label": self.label,
             "writable": self.state is not None,
             "path": str(snapshot.path) if snapshot and snapshot.path else "",
             "error": snapshot.error if snapshot else "",
@@ -580,7 +627,9 @@ class PortalHandler(BaseHTTPRequestHandler):
         self._send(
             404,
             "text/html; charset=utf-8",
-            render.render_not_found(domains, self.built_at, what).encode("utf-8"),
+            render.render_not_found(domains, self.built_at, what, self.label).encode(
+                "utf-8"
+            ),
         )
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
@@ -618,6 +667,7 @@ def serve(
     state: PortalState | None = None,
     state_path: Path | None = None,
     no_state: bool = False,
+    label: str | None = None,
 ) -> int:
     """Build the registry (if needed) and serve the portal until interrupted.
 
@@ -637,11 +687,14 @@ def serve(
             ``<hermes root>/portal/state.json``.
         no_state: Serve without a store, so the star buttons report 409 and nothing
             in the process can write anything.
+        label: Name this instance by, shown in the header and the page title;
+            ``None`` uses this machine's hostname (see :func:`instance_label`).
 
     Returns:
         ``0`` on a clean shutdown.
     """
     built_at = as_of()
+    site = instance_label(label)
     if registry is None:
         registry = default_registry(
             hermes_home=hermes_home,
@@ -655,14 +708,17 @@ def serve(
     PortalHandler.registry = registry
     PortalHandler.state = state if not no_state else None
     PortalHandler.built_at = built_at
+    PortalHandler.label = site
     PortalHandler.hosts = allowed_hosts(host)
     PortalHandler.quiet = bool(PortalHandler.hosts)
 
     server = ThreadingHTTPServer((host, port), PortalHandler)
     bound_host, bound_port = server.server_address[:2]
     print(describe(registry))
+    where = f" on {site}" if site else ""
     print(
-        f"Hermes Portal running at http://{bound_host}:{bound_port}  (built {built_at})"
+        f"Hermes Portal running at http://{bound_host}:{bound_port}{where}"
+        f"  (built {built_at})"
     )
     print(write_policy(PortalHandler.state))
     if not PortalHandler.hosts:
@@ -704,6 +760,14 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="read every profile's skills too (default: yes)",
+    )
+    parser.add_argument(
+        "--label",
+        default=None,
+        help=(
+            "name this instance by, shown beside the brand and in the page title "
+            "(default: this machine's hostname)"
+        ),
     )
     parser.add_argument(
         "--state",
@@ -782,4 +846,5 @@ def main(argv: list[str] | None = None) -> int:
         graph_db=args.graph_db,
         state_path=Path(args.state) if args.state else None,
         no_state=args.no_state,
+        label=args.label,
     )

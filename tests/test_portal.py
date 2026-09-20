@@ -1102,6 +1102,49 @@ class TestRender(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
+    def test_the_page_names_the_instance_it_serves(self) -> None:
+        """Nothing else differs between two instances, so the label is the tell.
+
+        Two portals on two machines render identical HTML; the chip beside the brand
+        and the document title are the only things that say which one a reader is
+        looking at.
+        """
+        page = render.render_index(
+            self.domains, self.registry.overviews(), "STAMP", label="mac-mini"
+        )
+        self.assertIn('<span class="label">mac-mini</span>', page)
+        self.assertIn("<title>Hermes Portal \u00b7 mac-mini</title>", page)
+
+    def test_every_view_carries_the_label(self) -> None:
+        domain = self.registry.get("skills")
+        collections = self.registry.safe_collections(domain)
+        pages = (
+            render.render_domain(
+                domain, collections, self.domains, "STAMP", None, "mac-mini"
+            ),
+            render.render_favorites([], self.domains, "STAMP", "", "mac-mini"),
+            render.render_search("q", {}, {}, self.domains, "STAMP", "mac-mini"),
+            render.render_not_found(self.domains, "STAMP", "nope", "mac-mini"),
+        )
+        for page in pages:
+            self.assertIn('<span class="label">mac-mini</span>', page)
+            self.assertIn("\u00b7 mac-mini</title>", page)
+
+    def test_a_page_without_a_label_says_nothing_extra(self) -> None:
+        page = render.render_index(self.domains, self.registry.overviews(), "STAMP")
+        self.assertNotIn('<span class="label">', page)
+        self.assertIn("<title>Hermes Portal</title>", page)
+
+    def test_the_label_is_escaped_like_every_other_interpolation(self) -> None:
+        page = render.render_index(
+            self.domains,
+            self.registry.overviews(),
+            "STAMP",
+            label="<script>bad</script>",
+        )
+        self.assertNotIn("<script>bad</script>", page)
+        self.assertIn("&lt;script&gt;bad&lt;/script&gt;", page)
+
     def test_index_lists_every_domain_with_its_definition(self) -> None:
         page = render.render_index(self.domains, self.registry.overviews(), "STAMP")
         for domain in self.domains:
@@ -1212,15 +1255,17 @@ class TestRender(unittest.TestCase):
 
 
 @contextmanager
-def run_portal(root: Path) -> Iterator[str]:
+def run_portal(root: Path, label: str = "") -> Iterator[str]:
     """Serve the portal for *root* on an ephemeral port, yielding its base URL."""
     saved = (
         server.PortalHandler.registry,
         server.PortalHandler.built_at,
         server.PortalHandler.hosts,
+        server.PortalHandler.label,
     )
     server.PortalHandler.registry = server.default_registry(hermes_home=root)
     server.PortalHandler.built_at = "STAMP"
+    server.PortalHandler.label = label
     # the Host policy serve() applies for a loopback bind, so these tests run
     # against the configuration the portal actually ships with
     server.PortalHandler.hosts = server.allowed_hosts("127.0.0.1")
@@ -1248,6 +1293,7 @@ def run_portal(root: Path) -> Iterator[str]:
             server.PortalHandler.registry,
             server.PortalHandler.built_at,
             server.PortalHandler.hosts,
+            server.PortalHandler.label,
         ) = saved
 
 
@@ -1259,6 +1305,58 @@ def fetch(url: str) -> tuple[int, str, str]:
             response.headers.get("Content-Type", ""),
             response.read().decode(),
         )
+
+
+class InstanceLabelTestCase(unittest.TestCase):
+    """The label names the instance: in the page, in the JSON, or not at all."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = make_hermes_root(Path(self._tmp.name))
+        self.registry = server.default_registry(hermes_home=self.root)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_a_given_label_wins_over_the_hostname(self) -> None:
+        with mock.patch.object(server.socket, "gethostname", return_value="elsewhere"):
+            self.assertEqual("mac-mini", server.instance_label("  mac-mini  "))
+
+    def test_the_default_is_the_hostname_without_its_domain(self) -> None:
+        with mock.patch.object(
+            server.socket, "gethostname", return_value="mac-mini.local"
+        ):
+            self.assertEqual("mac-mini", server.instance_label())
+
+    def test_a_machine_with_no_name_renders_without_a_label(self) -> None:
+        with mock.patch.object(
+            server.socket, "gethostname", side_effect=OSError("no name")
+        ):
+            self.assertEqual("", server.instance_label())
+
+    def test_the_json_carries_the_label_on_every_payload(self) -> None:
+        skills = self.registry.get("skills")
+        index = server.index_payload(self.registry, "STAMP", "mac-mini")
+        domain = server.domain_payload(self.registry, skills, {}, "STAMP", "mac-mini")
+        search = server.search_payload(self.registry, "a", 5, "STAMP", "mac-mini")
+        self.assertEqual("mac-mini", index["label"])
+        self.assertEqual("mac-mini", domain["label"])
+        self.assertEqual("mac-mini", search["label"])
+
+    def test_the_served_page_and_json_name_the_instance(self) -> None:
+        with run_portal(self.root, label="mac-mini") as base:
+            status, _, body = fetch(base + "/")
+            self.assertEqual(200, status)
+            self.assertIn('<span class="label">mac-mini</span>', body)
+            self.assertIn("<title>Hermes Portal \u00b7 mac-mini</title>", body)
+            status, _, payload = fetch(base + "/index.json")
+            self.assertEqual(200, status)
+            self.assertEqual("mac-mini", json.loads(payload)["label"])
+            # the write endpoint's own document carries it too, so a script that
+            # talks to two instances never has to guess which one answered
+            status, _, plain = fetch(base + "/favorites.json")
+            self.assertEqual(200, status)
+            self.assertEqual("mac-mini", json.loads(plain)["label"])
 
 
 class TestServer(unittest.TestCase):
