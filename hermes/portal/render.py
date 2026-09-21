@@ -317,6 +317,9 @@ PAGE = Template(
         padding: 0.5rem 0.6rem; align-items: baseline;
     }
     #palette .hit.active { background: var(--here-bg); }
+    /* A hit with no page is still a result, just not a destination. */
+    #palette .hit.muted { cursor: default; opacity: 0.7; }
+    #palette .hit.muted .what { color: var(--muted); }
     #palette .hit .dom {
         color: var(--muted); font-size: 0.72rem; min-width: 5.5rem;
         text-transform: uppercase; letter-spacing: 0.05em;
@@ -523,7 +526,7 @@ def star_button(domain_key: str, record_id: str, title: str) -> str:
     )
 
 
-def _row_target(record: Record, domain_key: str, domains: Sequence[Domain] = ()) -> str:
+def row_target(record: Record, domain_key: str, domains: Sequence[Domain] = ()) -> str:
     """Where a row's title should point: its ``href``, or a detail page, or nowhere.
 
     The href always wins -- a box points at its filtered view, a card at its board note.
@@ -532,6 +535,10 @@ def _row_target(record: Record, domain_key: str, domains: Sequence[Domain] = ())
     record that lacked one, and 13 collections across 8 domains linked to a 404:
     aggregate rows such as ``plugins.kinds`` and ``vault.tags``, and entities without a
     page such as ``cron.runs`` and ``sessions.messages``.
+
+    Public because three views outside the row renderer need the same answer: the
+    command palette's search payload, the favourites rail and the favourites page.
+    Each of them used to re-derive a target and each of them re-derived it wrong.
     """
     if record.href:
         return record.href
@@ -545,6 +552,11 @@ def _row_target(record: Record, domain_key: str, domains: Sequence[Domain] = ())
     if found is None:
         return ""
     return detail_url(domain_key, str(record.id))
+
+
+def _row_target(record: Record, domain_key: str, domains: Sequence[Domain] = ()) -> str:
+    """The row renderer's name for :func:`row_target`."""
+    return row_target(record, domain_key, domains)
 
 
 def _record_row(
@@ -852,7 +864,7 @@ def _rail(
             f'{rows}<div class="meta">as of {html.escape(usage.as_of)}</div></section>'
         )
 
-    blocks.append(_favorites_panel(favorites))
+    blocks.append(_favorites_panel(favorites, domains))
 
     glance = []
     for domain in domains:
@@ -870,17 +882,45 @@ def _rail(
     return f'<aside class="rail">{"".join(blocks)}</aside>'
 
 
-def _favorites_panel(favorites: Sequence[Favorite]) -> str:
-    """The favourites block, with a link to the full page when there are any."""
+def _favorite_target(favorite: Favorite, domains: Sequence[Domain]) -> str:
+    """Where a favourite points, or ``""`` when it has no page.
+
+    A favourite is a stored ``(domain, id)`` pair, not a Record, so wrap it in one
+    and ask the same rule the rows use.  The old code built ``/<domain>/<id>`` with
+    ``html.escape`` alone: no URL quoting and no has-page check, so a note whose id
+    is a path -- every vault note -- rendered a link the server read as a different
+    file (or no file at all).
+    """
+    record = Record(id=favorite.id, title=favorite.title)
+    return row_target(record, favorite.domain, domains)
+
+
+def _favorite_title(favorite: Favorite, domains: Sequence[Domain]) -> str:
+    """A favourite's title, linked only when the domain confirms a page exists."""
+    target = _favorite_target(favorite, domains)
+    title = rich(favorite.title)
+    if not target:
+        return title
+    return f'<a href="{html.escape(target, quote=True)}">{title}</a>'
+
+
+def _favorites_panel(
+    favorites: Sequence[Favorite],
+    domains: Sequence[Domain] = (),
+) -> str:
+    """The favourites block, with a link to the full page when there are any.
+
+    ``domains`` is what lets a favourite check for a page before linking; a caller
+    that passes none gets plain text rather than a guessed URL.
+    """
     if not favorites:
         return (
             '<section class="panel"><h3>Favourites</h3>'
             '<p class="empty">Star anything with the \u2606 beside it.</p></section>'
         )
     rows = "".join(
-        '<div class="stat"><span><a href="/'
-        f'{html.escape(favorite.domain)}/{html.escape(favorite.id, quote=True)}">'
-        f"{rich(favorite.title)}</a></span>"
+        '<div class="stat"><span>'
+        f"{_favorite_title(favorite, domains)}</span>"
         f'<span class="meta">{html.escape(favorite.domain)}</span></div>'
         for favorite in favorites[:8]
     )
@@ -907,8 +947,7 @@ def render_favorites(
             '<div class="row">'
             f'<div><div class="title">'
             f"{star_button(favorite.domain, favorite.id, favorite.title)}"
-            f'<a href="/{html.escape(favorite.domain)}/'
-            f'{html.escape(favorite.id, quote=True)}">{rich(favorite.title)}</a>'
+            f"{_favorite_title(favorite, domains)}"
             f'</div><div class="meta">{html.escape(favorite.id)}</div></div>'
             f'<div class="sub"><a href="/{html.escape(favorite.domain)}">'
             f"{html.escape(favorite.domain)}</a></div>"
@@ -1234,9 +1273,18 @@ APP_JS = r"""
                 el.appendChild(dom);
                 el.appendChild(what);
                 el.appendChild(why);
-                var url = "/" + encodeURIComponent(domain) + "/" +
-                    encodeURIComponent(record.id);
-                el.addEventListener("click", function () { window.location = url; });
+                // The server resolved record.url with the same rule the rows use:
+                // a record with no page has none, so it stays a plain row instead
+                // of linking to a 404.  A per-message hit still has a url -- its
+                // session's page -- because the domain sets it.
+                var url = record.url || "";
+                if (url) {
+                    el.addEventListener("click", function () {
+                        window.location = url;
+                    });
+                } else {
+                    el.classList.add("muted");
+                }
                 results.appendChild(el);
                 hits.push({ el: el, url: url });
             });
@@ -1293,7 +1341,7 @@ APP_JS = r"""
             event.preventDefault();
             active = (active - 1 + hits.length) % hits.length;
             mark();
-        } else if (event.key === "Enter" && hits[active]) {
+        } else if (event.key === "Enter" && hits[active] && hits[active].url) {
             event.preventDefault();
             window.location = hits[active].url;
         }

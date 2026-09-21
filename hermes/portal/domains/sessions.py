@@ -669,6 +669,11 @@ class SessionsDomain(SnapshotDomain[None]):
                     )
                     + (("tool call",) if tool else ()),
                     fields=(("session", session_id), ("role", role)),
+                    # A message has no page of its own; its href points at the
+                    # session that holds it, the same target the messages
+                    # collection and the search row already emit.  Without this
+                    # the palette guessed /sessions/message-<id>, a 404.
+                    href=detail_url("sessions", session_id) if session_id else "",
                     links=((detail_url("sessions", session_id), "Open session"),)
                     if session_id
                     else (),

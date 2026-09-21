@@ -205,16 +205,42 @@ def detail_payload(
 def search_payload(
     registry: DomainRegistry, query: str, limit: int, built_at: str, label: str = ""
 ) -> dict[str, Any]:
-    """Search results as JSON, with per-domain totals."""
+    """Search results as JSON, with per-domain totals and every hit's target.
+
+    Each hit carries a ``url`` resolved with :func:`render.row_target`: the
+    record's own href, a detail page the domain confirms exists, or ``""`` when
+    it has no page.  The palette used to guess ``/<domain>/<id>`` for every hit,
+    so a per-message or per-log-line hit linked to a 404.  Resolving on the
+    server keeps that rule in one place -- the payload and the rendered rows
+    cannot disagree.
+    """
+    domains = registry.all()
     groups = registry.search(query, limit)
+    payload_groups: dict[str, list[dict[str, Any]]] = {}
+    for domain in domains:
+        hits: list[dict[str, Any]] = []
+        for record in groups.get(domain.key, ()):
+            hit = jsonable(record)
+            # row_target covers the record's own href and a detail page the domain
+            # confirms exists.  A hit with neither can still carry an explicit link --
+            # a log line's "Open file", a run's "Job" -- which is a destination the
+            # domain vouched for, so the palette links that instead of dropping the
+            # jump: the 80 per-log-line hits have no page of their own but do have a
+            # file.  Empty stays empty when there is nothing to point at.
+            target = render.row_target(record, domain.key, domains)
+            if not target and record.links:
+                target = record.links[0][0]
+            hit["url"] = target
+            hits.append(hit)
+        payload_groups[domain.key] = hits
     return {
         "built_at": built_at,
         "label": label,
         "query": query,
         "limit": limit,
-        "order": [domain.key for domain in registry.all()],
-        "counts": {domain.key: len(groups[domain.key]) for domain in registry.all()},
-        "groups": jsonable(groups),
+        "order": [domain.key for domain in domains],
+        "counts": {domain.key: len(groups[domain.key]) for domain in domains},
+        "groups": payload_groups,
     }
 
 

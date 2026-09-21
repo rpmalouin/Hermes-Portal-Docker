@@ -982,6 +982,48 @@ class TestCronDomain(unittest.TestCase):
         self.assertEqual(incidents.count.value, 1)
         self.assertEqual(incidents.records[0].title, "boom-signature")
 
+    def test_a_run_for_a_deleted_job_links_no_page(self) -> None:
+        """Runs outlive the job that made them, so the job page can be gone.
+
+        On the live container /cron/abe53228a4a5 and /cron/dca8915327ee were in
+        the history while jobs.json held only 0a8f84d65e36; the row still renders
+        the id and title, it just does not link a 404.
+        """
+        con = sqlite3.connect(self.root / "cron" / "executions.db")
+        con.execute("update executions set job_id = 'deleted-job' where id = 1")
+        con.commit()
+        con.close()
+        self.domain.forget()
+        runs = self.domain.collections()[1]
+        orphan = next(
+            r for r in runs.records if dict(r.fields)["job id"] == "deleted-job"
+        )
+        self.assertEqual(orphan.href, "")
+        self.assertEqual(orphan.links, ())
+        self.assertEqual(orphan.title, "deleted-job")
+
+    def test_a_run_for_a_living_job_still_links_its_job_page(self) -> None:
+        runs = self.domain.collections()[1]
+        linked = next(r for r in runs.records if dict(r.fields)["job id"] == JOB_ID)
+        self.assertEqual(linked.href, render.detail_url("cron", JOB_ID))
+        self.assertEqual(linked.links, ((render.detail_url("cron", JOB_ID), "Job"),))
+
+    def test_an_incident_for_a_deleted_job_links_no_page(self) -> None:
+        con = sqlite3.connect(self.root / "cron" / "executions.db")
+        con.execute("update cron_incidents set job_id = 'deleted-job' where id = 1")
+        con.commit()
+        con.close()
+        self.domain.forget()
+        incident = self.domain.collections()[2].records[0]
+        self.assertEqual(incident.href, "")
+        self.assertEqual(incident.links, ())
+        self.assertEqual(dict(incident.fields)["job id"], "deleted-job")
+
+    def test_an_incident_for_a_living_job_still_links_its_job_page(self) -> None:
+        incident = self.domain.collections()[2].records[0]
+        self.assertEqual(incident.href, render.detail_url("cron", JOB_ID))
+        self.assertEqual(incident.links, ((render.detail_url("cron", JOB_ID), "Job"),))
+
     def test_detail_includes_prompt_and_script(self) -> None:
         record = self.domain.detail(JOB_ID)
         self.assertIsNotNone(record)
@@ -1083,6 +1125,76 @@ class TestCronDomain(unittest.TestCase):
             collection = domain.collections()[0]
             self.assertEqual(collection.count.value, 0)
             self.assertTrue(any("malformed JSON" in note for note in collection.notes))
+
+
+class SearchTargetTestCase(unittest.TestCase):
+    """The command palette's JSON target: the row rule, resolved on the server.
+
+    The palette used to build ``/<domain>/<id>`` for every hit.  Search hits include
+    records with no page of their own -- a per-message hit, a per-log-line hit -- so
+    clicking one loaded ``/sessions/message-...`` or ``/logs/agent.log.3-...`` and
+    404ed.  The server now resolves each hit with the same rule the rows use.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = make_hermes_root(Path(self._tmp.name))
+        self.registry = server.default_registry(hermes_home=self.root)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_a_message_hit_points_at_its_session_not_a_message_page(self) -> None:
+        payload = server.search_payload(self.registry, "cron parser", 5, "STAMP")
+        hits = payload["groups"]["sessions"]
+        messages = [hit for hit in hits if hit["id"].startswith("message-")]
+        self.assertTrue(messages, hits)
+        for hit in messages:
+            self.assertEqual(hit["url"], render.detail_url("sessions", SESSION_A))
+            self.assertNotIn("message-", hit["url"])
+
+    def test_a_hit_with_no_page_carries_an_empty_url(self) -> None:
+        """A record the domain cannot produce a page for gets no target, so the
+        palette renders a plain non-clickable row rather than guessing a 404."""
+        record = Record(id="message-1", title="user message")
+        domain = Domain(
+            key="sessions",
+            title="Sessions",
+            summary="s",
+            overview=lambda: build_collection("o", "O", "d", "rule", []),
+            collections=lambda *_args, **_kwargs: (),
+            detail=lambda _record_id: None,
+            search=lambda _query, _limit: (record,),
+        )
+        registry = DomainRegistry()
+        registry.register(domain)
+        payload = server.search_payload(registry, "anything", 5, "STAMP")
+        self.assertEqual(payload["groups"]["sessions"][0]["url"], "")
+        self.assertEqual(render.row_target(record, "sessions", [domain]), "")
+
+    def test_a_hit_without_a_page_but_with_a_link_uses_that_link(self) -> None:
+        """A per-log-line hit has no page of its own, but the domain hands it a link
+        to the file it came from -- so the palette links the file rather than
+        dropping the jump.  Only a hit with neither a page nor a link stays plain.
+        """
+        record = Record(
+            id="agent.log.3-126",
+            title="error: something",
+            links=(("/logs/agent.log.3", "Open file"),),
+        )
+        domain = Domain(
+            key="logs",
+            title="Logs",
+            summary="s",
+            overview=lambda: build_collection("o", "O", "d", "rule", []),
+            collections=lambda *_args, **_kwargs: (),
+            detail=lambda _record_id: None,
+            search=lambda _query, _limit: (record,),
+        )
+        registry = DomainRegistry()
+        registry.register(domain)
+        payload = server.search_payload(registry, "anything", 5, "STAMP")
+        self.assertEqual(payload["groups"]["logs"][0]["url"], "/logs/agent.log.3")
 
 
 # --------------------------------------------------------------------------

@@ -341,16 +341,20 @@ class CronDomain(SnapshotDomain[None]):
             if began is not None and ended is not None:
                 duration = (ended - began).total_seconds()
             job_key = str(_get(row, "job_id", "?"))
+            # Runs outlive the job that made them.  Link the job page only when
+            # the definition is still in jobs.json; otherwise /cron/<job_key> is
+            # a 404, so the row keeps the id and title as plain text.
+            job_exists = job_key in names
             records.append(
                 Record(
                     id=str(_get(row, "id")),
                     title=names.get(job_key, job_key),
-                    href=detail_url("cron", job_key) if job_key != "?" else "",
+                    href=detail_url("cron", job_key) if job_exists else "",
                     subtitle=f"{fmt_time(started)} · {_get(row, 'status')}"
                     + (f" · {fmt_duration(duration)}" if duration is not None else ""),
                     badges=(str(_get(row, "status")), str(_get(row, "source")))
                     + ((fmt_duration(duration),) if duration is not None else ()),
-                    links=((detail_url("cron", job_key), "Job"),),
+                    links=((detail_url("cron", job_key), "Job"),) if job_exists else (),
                     fields=(
                         ("job", names.get(job_key, job_key)),
                         ("job id", job_key),
@@ -417,25 +421,26 @@ class CronDomain(SnapshotDomain[None]):
             state = str(_get(row, "state", "?"))
             states[state] = states.get(state, 0) + 1
         _close(con)
-        return build_collection(
-            "incidents",
-            "Incidents",
-            "Failures recorded by the scheduler, with their error signature.",
-            "rows in cron_incidents",
-            [
+        # An incident survives the job it names, so link its job page only while
+        # the definition is still in jobs.json; otherwise /cron/<job_id> is a 404.
+        jobs, _job_notes, _jobs_error = self._jobs_and_notes()
+        names = {str(job.get("id")): _job_title(job) for job in jobs}
+        records = []
+        for row in rows:
+            job_key = str(_get(row, "job_id"))
+            job_exists = job_key in names
+            records.append(
                 Record(
                     id=str(_get(row, "id")),
                     title=truncate(str(_get(row, "error_sig", "incident")), 80),
-                    href=detail_url("cron", str(_get(row, "job_id")))
-                    if _get(row, "job_id")
-                    else "",
+                    href=detail_url("cron", job_key) if job_exists else "",
                     subtitle=f"{truncate(str(_get(row, 'error', '')), 120)}",
                     badges=(
                         str(_get(row, "state")),
                         str(_get(row, "failure_type")),
                         f"job {_get(row, 'job_id')}",
                     ),
-                    links=((f"/cron/{_get(row, 'job_id', '')}", "Job"),),
+                    links=((detail_url("cron", job_key), "Job"),) if job_exists else (),
                     fields=(
                         ("job id", str(_get(row, "job_id"))),
                         ("state", str(_get(row, "state"))),
@@ -448,8 +453,13 @@ class CronDomain(SnapshotDomain[None]):
                         ("output file", str(_get(row, "output_file"))),
                     ),
                 )
-                for row in rows
-            ],
+            )
+        return build_collection(
+            "incidents",
+            "Incidents",
+            "Failures recorded by the scheduler, with their error signature.",
+            "rows in cron_incidents",
+            records,
             cap=JOBS_CAP,
             sources=self._sources(),
             extra_counts=tuple(

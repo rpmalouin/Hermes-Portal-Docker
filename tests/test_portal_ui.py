@@ -43,6 +43,7 @@ from hermes.portal import model as registry_module  # noqa: E402
 from hermes.portal import render, server, taxonomy  # noqa: E402
 from hermes.portal.domains import health as health_domain  # noqa: E402
 from hermes.portal.domains import logs as logs_domain  # noqa: E402
+from hermes.portal.domains import vault as vault_domain  # noqa: E402
 from hermes.portal.state import (  # noqa: E402
     MAX_FAVORITES,
     Favorite,
@@ -322,6 +323,28 @@ class RenderTestCase(unittest.TestCase):
         self.assertNotIn("</script", render.APP_JS.lower())
         self.assertNotIn("<script", render.APP_JS.lower())
 
+    def test_the_palette_follows_the_served_url_and_never_guesses(self) -> None:
+        """The palette trusts ``record.url``; it must not rebuild ``/<domain>/<id>``.
+
+        That guess was 365 of the audit's 367 dead links: a per-message hit loaded
+        ``/sessions/message-...`` and a per-log-line hit ``/logs/<file>-<n>``, both
+        404.  Read the served ``/app.js``, the way the refresh test does, so this
+        checks the wire rather than the module constant.
+        """
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            run_portal(make_hermes_root(Path(tmp))) as base,
+        ):
+            script = (
+                urllib.request.urlopen(f"{base}/app.js", timeout=10).read().decode()
+            )
+        self.assertIn("record.url", script)
+        self.assertIn("if (url)", script)
+        self.assertIn('el.classList.add("muted")', script)
+        self.assertIn("hits[active].url", script)
+        self.assertNotIn("encodeURIComponent(record.id)", script)
+        self.assertNotIn('"/" + encodeURIComponent(domain)', script)
+
     def test_detail_links_render_their_href_and_label_the_right_way_round(self) -> None:
         """The bug this pins: links were rendered with the label as the href.
 
@@ -379,6 +402,56 @@ class RenderTestCase(unittest.TestCase):
         panel = render._favorites_panel(many)
         self.assertIn("all 11", panel)
         self.assertEqual(panel.count('class="stat"'), 8)
+
+    def test_a_vault_favourite_links_a_percent_encoded_path(self) -> None:
+        """A vault note's id is a path; the href must keep it one encoded segment.
+
+        The rail built ``/<domain>/<id>`` with ``html.escape`` alone, so a starred
+        note rendered as ``/vault/Homelab/03%20Areas/...`` -- a 404 -- instead of
+        ``/vault/Homelab%2F03%20Areas%2F...``.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            vault_root = Path(tmp) / "vault"
+            note = vault_root / "Homelab" / "03 Areas" / "Homelab.md"
+            note.parent.mkdir(parents=True)
+            note.write_text("# Homelab\n", encoding="utf-8")
+            domain = vault_domain.build_domain(vault=vault_root)
+            favorite = Favorite(
+                domain="vault",
+                id="Homelab/03 Areas/Homelab.md",
+                title="Homelab",
+                added_at="2026-01-01",
+            )
+            page = render.render_favorites((favorite,), (domain,), "STAMP")
+            panel = render._favorites_panel((favorite,), (domain,))
+        self.assertIn('href="/vault/Homelab%2F03%20Areas%2FHomelab.md"', page)
+        self.assertIn('href="/vault/Homelab%2F03%20Areas%2FHomelab.md"', panel)
+
+    def test_a_favourite_with_no_page_renders_without_a_link(self) -> None:
+        """A favourite whose target is gone is plain text, never a guessed URL."""
+        domain = registry_module.Domain(
+            key="vault",
+            title="Vault",
+            summary="s",
+            overview=lambda: registry_module.build_collection(
+                "o", "O", "d", "rule", []
+            ),
+            collections=lambda *_args, **_kwargs: (),
+            detail=lambda _record_id: None,
+            search=lambda _query, _limit: (),
+        )
+        favorite = Favorite(
+            domain="vault",
+            id="gone/Note.md",
+            title="Gone note",
+            added_at="2026-01-01",
+        )
+        page = render.render_favorites((favorite,), (domain,), "STAMP")
+        panel = render._favorites_panel((favorite,), (domain,))
+        self.assertNotIn('href="/vault/gone', page)
+        self.assertNotIn('href="/vault/gone', panel)
+        self.assertIn("Gone note", page)
+        self.assertIn("Gone note", panel)
 
     def test_titles_are_escaped_on_the_favourites_page(self) -> None:
         page = render.render_favorites(
