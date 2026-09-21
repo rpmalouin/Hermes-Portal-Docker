@@ -92,3 +92,8 @@ CODEBUDDY.md
 GEMINI.md
 QODER.md
 opencode.jsonc
+
+# The running decisions log for this checkout.  Read first each session, kept out of
+# the repository so it never dirties `git status`: the tracked README is the behaviour
+# reference, MEMORY.md records what the box did and what was decided, by date.
+MEMORY.md
