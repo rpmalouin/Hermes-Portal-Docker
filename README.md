@@ -190,7 +190,7 @@ anything you can see, you can also fetch:
 | `/<domain>/<id>` | one record, plus the collections behind it (a session's messages, a job's runs) |
 | `/search?q=…` | cross-domain search; messages go through the FTS indexes |
 | `/favorites` | the records you starred — the one thing the portal writes |
-| `POST /refresh.json` | re-read every source; writes nothing (the ↻ button in the header) |
+| `POST /refresh.json` | re-read every source; writes nothing (the **Refresh** button in the header) |
 | `/<domain>.json`, `/index.json`, `/favorites.json`, `/search.json` | the same data, for scripting |
 
 Filters live in the URL and combine: `?box=creative` (or a category path,
@@ -199,7 +199,7 @@ Filters live in the URL and combine: `?box=creative` (or a category path,
 **Freshness.** Sessions, usage, cron, health, logs and the code graph are read when you load
 the page. The vault, skills, memory and plugins are indexed **once per process** — they are the
 expensive ones, and a page that silently re-read a 3 MB vault mid-request would be a surprise —
-so the header carries a **↻ button** that drops those snapshots and re-reads. Every collection
+so the header carries a **Refresh button** that drops those snapshots and re-reads. Every collection
 stamps the `as of` time it was read (UTC), so a page always tells you how old it is.
 
 Useful flags: `--vault` (which Obsidian vault; or set `$HERMES_VAULT`), `--graph-db` (which code graph),
@@ -710,7 +710,7 @@ memberships, its risk row and its community.
 The mockup's UI on top of real data, with one new idea: a record can be **starred**.
 
 * **A refresh writes nothing.** `POST /refresh.json` drops the per-process snapshots so the next
-  page re-reads every source; it is the header's ↻ button and the only way a page shows you an
+  page re-reads every source; it is the header's **Refresh** button and the only way a page shows you an
   edit the portal had already cached.
 * **Favourites are the portal's only write.** `POST /favorites.json` takes
   `{domain, id, action}` and updates `<hermes root>/portal/state.json` (override with

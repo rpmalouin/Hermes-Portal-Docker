@@ -1955,3 +1955,10 @@ class RefreshTestCase(unittest.TestCase):
         self.assertIn("Re-read every source", page)
         self.assertIn("/refresh.json", script)
         self.assertIn('getElementById("refresh")', script)
+        # Spelled out and accent-styled: the header's other controls are glyph
+        # chips, and a long-running instance needs a visitor to find this one.
+        self.assertIn('class="refresh" type="button" id="refresh"', page)
+        self.assertIn(">Refresh</button>", page)
+        self.assertNotIn("\u21bb</button>", page)
+        self.assertIn("button.refresh", page)
+        self.assertIn('refresh.textContent = "Refreshing', script)

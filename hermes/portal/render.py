@@ -153,6 +153,17 @@ PAGE = Template(
         background: var(--nav-bg); border-color: var(--border-2);
         color: var(--fg);
     }
+    /* Refresh is the one control a long-running instance needs a visitor to
+       find: spelled out and carrying the accent, where its neighbours are
+       glyph chips.  It is the header's only state-changing button (it drops
+       the per-process snapshots; nothing is written). */
+    button.refresh {
+        background: transparent; border: 1px solid var(--accent); border-radius: 8px;
+        color: var(--accent); cursor: pointer; font-size: 0.85rem; font-weight: 600;
+        padding: 0.4rem 0.9rem;
+    }
+    button.refresh:hover:not(:disabled) { background: var(--accent); color: #fff; }
+    button.refresh:disabled { cursor: default; opacity: 0.55; }
     h1 { font-size: 1.9rem; margin: 0 0 0.35rem; }
     h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; }
     .crumbs { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.6rem; }
@@ -448,9 +459,9 @@ def _nav(
         f' placeholder="{placeholder}">\n'
         '    <button type="submit">Search</button>\n'
         "  </form>\n"
-        '  <button class="ghost" type="button" id="refresh" '
-        'title="Re-read every source (the cached ones are read once per run)">'
-        "\u21bb</button>\n"
+        '  <button class="refresh" type="button" id="refresh" '
+        'title="Re-read every source now (cached ones are read once per run)">'
+        "Refresh</button>\n"
         '  <button class="ghost" type="button" id="palette-open" '
         'title="Search (Ctrl+K)">\u2318K</button>\n'
         '  <button class="ghost" type="button" id="theme-toggle" '
@@ -1153,8 +1164,10 @@ APP_JS = r"""
     // was just read.  It writes nothing -- a favourite is still the only write.
     var refresh = document.getElementById("refresh");
     if (refresh) {
+        var refresh_label = refresh.textContent;
         refresh.addEventListener("click", function () {
             refresh.disabled = true;
+            refresh.textContent = "Refreshing\u2026";
             fetch("/refresh.json", { method: "POST" })
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
@@ -1164,6 +1177,7 @@ APP_JS = r"""
                 })
                 .catch(function (error) {
                     refresh.disabled = false;
+                    refresh.textContent = refresh_label;
                     say("Refresh failed: " + error.message);
                 });
         });
